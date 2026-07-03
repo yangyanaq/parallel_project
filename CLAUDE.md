@@ -39,7 +39,7 @@ La línea base secuencial (`T_1`) se corre en **un solo núcleo del nodo maestro
 - **Workers RPi:** `192.168.77.11`–`192.168.77.14` (4 workers; el maestro también computa → 5 nodos / 20 núcleos).
 - **Workers Jetson:** `192.168.77.21`–`192.168.77.23` (3 Jetson Nano; el maestro RPi NO computa en los jobs Jetson, solo lanza `mpirun` y sirve NFS).
 - **Estación RTX 4090:** máquina Windows **dentro de la red del clúster** (`192.168.77.x`), pero se opera solo por **AnyDesk** (sin SSH desde la PC de trabajo); CUDA/MSVC/git por instalar. Compila nativo Windows (`nvcc` + MSVC). Al estar en la LAN, puede bajar los `.bin` directo del NFS/maestro `.10` (scp desde la propia RTX), sin transferir por AnyDesk. Credenciales en `pass.txt` (fuera del repo — el repo es público).
-- **PC de trabajo (esta):** Windows, edita el código, corre `preprocess.py`, accede por SSH a `192.168.77.10`.
+- **PC de trabajo (esta):** Windows, edita el código, corre `preprocess.py`. **NO está en la red física del clúster**: llega al maestro `.10` por **ZeroTier** (ver `docs/runbook_zerotier.md`); el camino manual alternativo es AnyDesk → RTX → SSH.
 - Flujo de código: repo **GitHub**; los maestros hacen `git pull` y compilan; la RTX hace `git pull` vía AnyDesk.
 - `pass.txt` (credenciales) vive en la raíz: **jamás** debe entrar al repo (va en `.gitignore`).
 
