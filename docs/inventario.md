@@ -51,9 +51,23 @@ Workers RPi `192.168.77.11-.14` ✅ · Jetson `192.168.77.21-.23` ✅ — los 7 
 - NTP **activo y sincronizado**; zona `America/Bogota` (−05:00). Timestamps alineables con el medidor de pared ✅ (gotcha G7 resuelto).
 - Rieles INA3221 de las Jetson: **por inventariar** cuando se entre a una Jetson (Fase 4).
 
+## Jetson (workers .21–.23) — confirmado 2026-07-02
+
+- **CUDA 10.2** en `/usr/local/cuda-10.2` (symlink `/usr/local/cuda`). `nvcc` no está en el PATH por defecto → exportar `PATH=/usr/local/cuda/bin:$PATH` al compilar.
+- **JetPack R32.4.4** (L4T), board `t210ref`, `aarch64` → arch **`sm_53`** ✅ (coincide con el plan).
+- `nfs-common` presente; NFS montado ✅.
+- Rieles INA3221 para energía: **por inventariar** al entrar a compilar la variante Jetson (Fase 4).
+
+## Estado NFS en workers (2026-07-02)
+
+Los **7 workers montan** `/home/cris/kmeans_share` y ven los 3 `.bin` ✅:
+- RPi `.11–.14`: se instaló `nfs-common` (faltaba) + `mount -a`. El fstab ya tenía la entrada → remonta al reboot.
+- Jetson `.21–.23`: solo `mount -a` (nfs-common ya estaba).
+
 ## Pendientes de Fase 0
 
-- [ ] Confirmar subida de los 3 `.bin` al NFS (en curso).
-- [ ] Verificar que un worker RPi y una Jetson montan el NFS y ven los `.bin`.
-- [ ] Inventario de una Jetson: versión CUDA/JetPack, `sm_53`, ruta INA3221, que monte el NFS.
-- [ ] Setup RTX (CUDA 12.x + MSVC + git) — runbook aparte.
+- [x] Subir los 3 `.bin` al NFS.
+- [x] Verificar que los 7 workers montan el NFS y ven los `.bin`.
+- [x] Inventario Jetson: CUDA 10.2 / JetPack R32.4.4 / `sm_53`.
+- [ ] Rutas INA3221 de las Jetson (se hace en Fase 4).
+- [ ] Setup RTX (CUDA 12.x + MSVC + git) — runbook aparte (se hace en Fase 3).
