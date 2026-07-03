@@ -58,7 +58,10 @@ static FILE *abrir_con_cabecera(const char *csv, const char *cabecera)
         fprintf(stderr, "ERROR: no se pudo abrir %s para append\n", csv);
         return NULL;
     }
-    /* con "a" la posición está al final: 0 => archivo recién creado/vacío */
+    /* tras fopen("a") ftell puede reportar 0 aunque haya contenido (la
+     * posición de lectura queda al inicio); forzar al final antes de
+     * preguntar el tamaño. 0 => archivo recién creado/vacío. */
+    fseek(f, 0, SEEK_END);
     if (ftell(f) == 0)
         fputs(cabecera, f);
     return f;
