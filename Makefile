@@ -28,6 +28,16 @@ bin/kmeans_rpi: $(COMMON_SRC) src/rpi/main_mpi.c $(COMMON_HDR)
 	@mkdir -p bin
 	$(MPICC) $(CFLAGS) $(COMMON_SRC) src/rpi/main_mpi.c -o $@ $(LDLIBS)
 
+# MPI multi-nodo exige el binario en la MISMA ruta en todos los nodos.
+# Los workers NO clonan el repo: solo montan el NFS. 'install-rpi' copia el
+# binario al NFS compartido (ver docs/runbook_lanzar_mpi.md). Lanzar SIEMPRE
+# con la ruta NFS: mpirun --hostfile hosts_rpi -np N $(NFS_BIN) ...
+NFS_DIR ?= /home/cris/kmeans_share
+install-rpi: rpi
+	@mkdir -p $(NFS_DIR)/bin
+	cp bin/kmeans_rpi $(NFS_DIR)/bin/kmeans_rpi
+	@echo "binario en $(NFS_DIR)/bin/kmeans_rpi (visible por todos los nodos)"
+
 # Jetson: kernels con nvcc (CUDA 10.2, sm_53), host con mpicc, enlace con mpicc
 jetson: bin/kmeans_jetson
 bin/kmeans_jetson: $(COMMON_SRC) src/jetson/main_hybrid.c src/jetson/kmeans_kernel.cu $(COMMON_HDR)
@@ -42,4 +52,4 @@ bin/kmeans_jetson: $(COMMON_SRC) src/jetson/main_hybrid.c src/jetson/kmeans_kern
 clean:
 	rm -rf bin build *.o
 
-.PHONY: all seq rpi jetson clean
+.PHONY: all seq rpi install-rpi jetson clean
