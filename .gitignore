@@ -1,0 +1,28 @@
+# Credenciales — JAMÁS commitear
+pass.txt
+
+# Datos (los .bin/.csv se generan con scripts/preprocess.py y se copian a mano)
+data/
+
+# Binarios y objetos de compilación
+bin/
+build/
+*.o
+*.obj
+*.exe
+*.exp
+*.lib
+*.pdb
+
+# Figuras regenerables (benchmark.csv y wcss_convergence.csv SÍ se versionan)
+results/figs/*.png
+results/figs/*.pdf
+
+# Python
+__pycache__/
+*.pyc
+
+# Editores / SO
+.vscode/
+Thumbs.db
+.DS_Store
