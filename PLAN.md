@@ -51,7 +51,7 @@ Qué queda fijado: usuario SSH, ruta del NFS montado en todos los nodos (ej. `/m
 1. En esta PC: `python scripts/preprocess.py --inputs data/yellow_tripdata_2015-01.csv --outdir data` → `nyc_100K.bin`, `nyc_1M.bin`, `nyc_10M.bin` (+ meta + csv chicos).
 2. Sanity-check automático contra los estadísticos del CLAUDE.md §5 (medias ≈ (40.75, −73.97), std ≤ 0.036°).
 3. `scp data/*.bin data/*.meta.json <user>@192.168.77.10:<ruta_NFS>/data/`.
-4. A la RTX: transferencia de archivos de AnyDesk (~355 MB total).
+4. A la RTX: está en la LAN del clúster → desde la propia RTX (vía AnyDesk) bajar del maestro: `scp <user>@192.168.77.10:<ruta_NFS>/data/*.bin C:\datos\` (Windows 10/11 trae cliente OpenSSH). Fallback: transferencia de archivos de AnyDesk (~355 MB).
 
 **Puerta de salida F0:** repo en GitHub clonado en `.10`; `.bin` visibles desde un worker RPi y una Jetson vía NFS; `nvcc` funcionando en la RTX; inventario documentado en `docs/inventario.md`.
 
