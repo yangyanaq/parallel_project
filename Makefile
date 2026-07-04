@@ -38,18 +38,31 @@ install-rpi: rpi
 	cp bin/kmeans_rpi $(NFS_DIR)/bin/kmeans_rpi
 	@echo "binario en $(NFS_DIR)/bin/kmeans_rpi (visible por todos los nodos)"
 
-# Jetson: kernels con nvcc (CUDA 10.2, sm_53), host con mpicc, enlace con mpicc
+# Jetson: kernels con nvcc (CUDA 10.2, sm_53), host con mpicc, enlace con mpicc.
+# nvcc no está en el PATH de la Jetson -> CUDA_HOME apunta al toolkit. gcc 7.5
+# y el host híbrido en C11 conservador (sin -march=native para no arriesgar en
+# la toolchain vieja; ver PLAN §5).
+CUDA_HOME ?= /usr/local/cuda
+JCFLAGS    = -O3 -std=c11 -funroll-loops -Wall -Wextra
 jetson: bin/kmeans_jetson
 bin/kmeans_jetson: $(COMMON_SRC) src/jetson/main_hybrid.c src/jetson/kmeans_kernel.cu $(COMMON_HDR)
 	@mkdir -p bin build
-	$(NVCC) -O3 -arch=sm_53 -std=c++11 -c src/jetson/kmeans_kernel.cu -o build/kmeans_kernel.o
-	$(MPICC) $(CFLAGS) -c $(COMMON_SRC) src/jetson/main_hybrid.c
+	$(CUDA_HOME)/bin/nvcc -O3 -arch=sm_53 -std=c++11 \
+	    -c src/jetson/kmeans_kernel.cu -o build/kmeans_kernel.o
+	$(MPICC) $(JCFLAGS) -c $(COMMON_SRC) src/jetson/main_hybrid.c
 	@mv *.o build/ 2>/dev/null || true
 	$(MPICC) build/rng.o build/io_dataset.o build/kmeans_core.o build/metrics.o \
 	         build/main_hybrid.o build/kmeans_kernel.o -o $@ \
-	         -L/usr/local/cuda/lib64 -lcudart $(LDLIBS)
+	         -L$(CUDA_HOME)/lib64 -lcudart $(LDLIBS)
+
+# Igual que install-rpi: el binario al NFS para que las 3 Jetson lo vean en la
+# misma ruta (ver docs/runbook_lanzar_mpi.md, gotcha binario-en-NFS).
+install-jetson: jetson
+	@mkdir -p $(NFS_DIR)/bin
+	cp bin/kmeans_jetson $(NFS_DIR)/bin/kmeans_jetson
+	@echo "binario en $(NFS_DIR)/bin/kmeans_jetson (visible por las 3 Jetson)"
 
 clean:
 	rm -rf bin build *.o
 
-.PHONY: all seq rpi install-rpi jetson clean
+.PHONY: all seq rpi install-rpi jetson install-jetson clean
