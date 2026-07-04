@@ -10,7 +10,7 @@
 | Maestro RPi — IP ZeroTier | `10.144.101.22` (red `c7c8172af1a15747`, iface `zt5u43m7nw`) |
 | Usuario / pass RPi (maestro y workers) | `cris` / ver `pass.txt` |
 | Usuario / pass Jetson | `nano` / ver `pass.txt` |
-| RTX 4090 | AnyDesk (acceso libre), en la LAN `192.168.77.x` |
+| RTX 4070 Ti (Win 11) | `192.168.77.161`, usuario `windows 11` (con espacio), equipo `DESKTOP-4APJUUH`. SSH por túnel: `ssh -J cris@10.144.101.22 "windows 11"@192.168.77.161`. AnyDesk de respaldo |
 
 **Nota:** el `hostname` del maestro es `worker1` (nombre heredado, no implica rol). El rol de maestro/lanzador lo cumple `.10`.
 
@@ -58,6 +58,15 @@ Workers RPi `192.168.77.11-.14` ✅ · Jetson `192.168.77.21-.23` ✅ — los 7 
 - `nfs-common` presente; NFS montado ✅.
 - Rieles INA3221 para energía: **por inventariar** al entrar a compilar la variante Jetson (Fase 4).
 
+## Estación RTX 4070 Ti (`.161`, Win 11) — confirmado 2026-07-03
+
+- **GPU real: NVIDIA GeForce RTX 4070 Ti, 12 GB** (driver 591.86), arch **`sm_89`**. NO es 4090 (toda la doc previa lo asumía; corregido).
+- **CUDA Toolkit 11.8** (`nvcc` V11.8.89) — 11.8 es la versión mínima que soporta Ada/`sm_89`. `nvml.lib` presente (energía G4).
+- **MSVC:** Visual Studio Build Tools 2022 (workload C++). `cl` vía vcvars.
+- **git** 2.42 para Windows.
+- Acceso: **OpenSSH Server** activo, `ssh -J cris@10.144.101.22 "windows 11"@192.168.77.161` (llave ed25519 de la PC de trabajo en `%ProgramData%\ssh\administrators_authorized_keys`).
+- Pendiente: clonar el repo en el HOME de la RTX (Fase 3).
+
 ## Estado NFS en workers (2026-07-02)
 
 Los **7 workers montan** `/home/cris/kmeans_share` y ven los 3 `.bin` ✅:
@@ -70,4 +79,4 @@ Los **7 workers montan** `/home/cris/kmeans_share` y ven los 3 `.bin` ✅:
 - [x] Verificar que los 7 workers montan el NFS y ven los `.bin`.
 - [x] Inventario Jetson: CUDA 10.2 / JetPack R32.4.4 / `sm_53`.
 - [ ] Rutas INA3221 de las Jetson (se hace en Fase 4).
-- [ ] Setup RTX (CUDA 12.x + MSVC + git) — runbook aparte (se hace en Fase 3).
+- [x] Setup RTX (CUDA 11.8 + MSVC 2022 + git) — HECHO 2026-07-03; SSH habilitado. Falta solo clonar el repo.

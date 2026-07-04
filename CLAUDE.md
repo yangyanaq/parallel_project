@@ -6,7 +6,7 @@
 
 ## 0. Qué se construye (en una frase)
 
-Tres implementaciones **desde cero, en C11**, del algoritmo **K-Means (Lloyd)** que resuelven el *mismo* problema con la *misma* lógica, para comparar rendimiento, energía y costo entre tres plataformas: un clúster Raspberry Pi 5 (MPI puro), un clúster Jetson Nano (MPI + CUDA) y una estación RTX 4090 (CUDA puro). El resultado central no es el clustering, sino un **`benchmark.csv`** con métricas comparables y los **gráficos** que lo acompañan.
+Tres implementaciones **desde cero, en C11**, del algoritmo **K-Means (Lloyd)** que resuelven el *mismo* problema con la *misma* lógica, para comparar rendimiento, energía y costo entre tres plataformas: un clúster Raspberry Pi 5 (MPI puro), un clúster Jetson Nano (MPI + CUDA) y una estación RTX 4070 Ti (CUDA puro). El resultado central no es el clustering, sino un **`benchmark.csv`** con métricas comparables y los **gráficos** que lo acompañan.
 
 ---
 
@@ -28,7 +28,7 @@ Tres implementaciones **desde cero, en C11**, del algoritmo **K-Means (Lloyd)** 
 |---|---|---|---|---|---|---|
 | **Clúster RPi 5** | 5 (1 maestro + 4 trabajadores) | 20× ARM Cortex-A76 @2.4 GHz (4/nodo) | — | 4 GB/nodo (20 GB agregados) | Gigabit Ethernet + switch, NFS en maestro | **MPI puro** |
 | **Clúster Jetson Nano** | 3 | 12× ARM Cortex-A57 (4/nodo) | 3× Maxwell, 128 CUDA cores c/u (`sm_53`) | 4 GB/nodo | Gigabit Ethernet + switch, NFS servido por el maestro RPi | **MPI + CUDA** |
-| **Estación RTX 4090** | 1 (x86-64) | host CPU | Ada Lovelace, 16 384 CUDA cores (`sm_89`), 24 GB GDDR6X | — | sin red (sin MPI) | **CUDA puro** |
+| **Estación RTX 4070 Ti** | 1 (x86-64) | host CPU | Ada Lovelace, 7 680 CUDA cores (`sm_89`), 12 GB GDDR6X | — | sin red (sin MPI) | **CUDA puro** |
 
 La línea base secuencial (`T_1`) se corre en **un solo núcleo del nodo maestro de la RPi 5**.
 
@@ -38,7 +38,7 @@ La línea base secuencial (`T_1`) se corre en **un solo núcleo del nodo maestro
 - **Maestro RPi (punto de entrada y lanzador de AMBOS clústeres):** `192.168.77.10`.
 - **Workers RPi:** `192.168.77.11`–`192.168.77.14` (4 workers; el maestro también computa → 5 nodos / 20 núcleos).
 - **Workers Jetson:** `192.168.77.21`–`192.168.77.23` (3 Jetson Nano; el maestro RPi NO computa en los jobs Jetson, solo lanza `mpirun` y sirve NFS).
-- **Estación RTX 4090:** máquina Windows **dentro de la red del clúster** (`192.168.77.x`), pero se opera solo por **AnyDesk** (sin SSH desde la PC de trabajo); CUDA/MSVC/git por instalar. Compila nativo Windows (`nvcc` + MSVC). Al estar en la LAN, puede bajar los `.bin` directo del NFS/maestro `.10` (scp desde la propia RTX), sin transferir por AnyDesk. Credenciales en `pass.txt` (fuera del repo — el repo es público).
+- **Estación RTX 4070 Ti:** máquina Windows 11 **dentro de la red del clúster** (`192.168.77.161`). Se accede por **SSH con túnel vía el maestro** (`ssh -J cris@.10 <usuario>@.161`); AnyDesk queda como respaldo gráfico. CUDA 11.8 + MSVC (VS Build Tools 2022) + git ya instalados. Compila nativo Windows (`nvcc` + MSVC). Al estar en la LAN, puede bajar los `.bin` directo del NFS/maestro `.10` (scp desde la propia RTX). Credenciales en `pass.txt` (fuera del repo — el repo es público).
 - **PC de trabajo (esta):** Windows, edita el código, corre `preprocess.py`. **NO está en la red física del clúster**: llega al maestro `.10` por **ZeroTier** (ver `docs/runbook_zerotier.md`); el camino manual alternativo es AnyDesk → RTX → SSH.
 - Flujo de código: repo **GitHub**; los maestros hacen `git pull` y compilan; la RTX hace `git pull` vía AnyDesk.
 - `pass.txt` (credenciales) vive en la raíz: **jamás** debe entrar al repo (va en `.gitignore`).
@@ -48,7 +48,7 @@ La línea base secuencial (`T_1`) se corre en **un solo núcleo del nodo maestro
 ## 3. Toolchain y compilación
 
 - **MPI:** Open MPI 4.1.6 (`mpicc`) en RPi y Jetson.
-- **CUDA:** Toolkit **10.2** en Jetson (JetPack 4.6, arch `sm_53`); Toolkit **12.x** en RTX (arch `sm_89`).
+- **CUDA:** Toolkit **10.2** en Jetson (JetPack 4.6, arch `sm_53`); Toolkit **11.8** en RTX (arch `sm_89` — 11.8 es la versión mínima que soporta Ada Lovelace).
 - Host/núcleo compilan como **C11**; los `.cu` los compila `nvcc` (CUDA C++).
 
 Banderas de referencia (ajústalas si hace falta):
@@ -64,7 +64,7 @@ mpicc -O3 -std=c11 -c src/common/*.c src/jetson/main_hybrid.c
 mpicc *.o build/kmeans_kernel.o -o bin/kmeans_jetson \
       -L/usr/local/cuda/lib64 -lcudart -lm
 
-# RTX 4090 (CUDA puro): main puede ser .cu
+# RTX 4070 Ti (CUDA puro): main puede ser .cu
 nvcc -O3 -arch=sm_89 -std=c++11 \
      src/common/io_dataset.c src/common/metrics.c \
      src/rtx/main_cuda.cu src/rtx/kmeans_kernel.cu -o bin/kmeans_rtx -lm
@@ -213,7 +213,7 @@ Carga del `Allreduce` por iteración: `k*d` doubles (160 B) + `k` conteos (~20�
 Igual que 8.1 entre nodos, pero la **asignación** de cada nodo corre en su GPU: `cudaMemcpy` del bloque local al device, kernel (un hilo por punto) que calcula el `argmin` sobre los `k` centroides y acumula sumas por clúster con `atomicAdd`; el parcial vuelve a la CPU para entrar al `MPI_Allreduce`. Centroides en `__constant__` (solo 20 doubles).
 
 ### 8.3 CUDA puro (RTX) — grano fino, sin MPI
-Una `cudaMemcpy` H2D antes del bucle. Las 100 iteraciones corren en GPU: kernel de asignación (un hilo por punto), reducción de sumas por clúster (usar `atomicAdd` o reducción en memoria compartida por bloque + combinación), actualización de centroides. Centroides en memoria constante. El dataset de 10M×4 doubles = 320 MB entra de sobra en 24 GB, así que **no fragmentar**.
+Una `cudaMemcpy` H2D antes del bucle. Las 100 iteraciones corren en GPU: kernel de asignación (un hilo por punto), reducción de sumas por clúster (usar `atomicAdd` o reducción en memoria compartida por bloque + combinación), actualización de centroides. Centroides en memoria constante. El dataset de 10M×4 doubles = 320 MB entra de sobra en 12 GB, así que **no fragmentar**.
 
 ---
 
@@ -243,7 +243,7 @@ Además, un **`results/wcss_convergence.csv`** opcional pero recomendado (`platf
 
 ## 10. Medición de energía
 
-- **RTX 4090:** muestrear potencia con **NVML** (`nvmlDeviceGetPowerUsage`) en un hilo cada ~100 ms durante la corrida; integrar potencia×tiempo → Wh. Registrar `avg_power_w` y `energy_wh`.
+- **RTX 4070 Ti:** muestrear potencia con **NVML** (`nvmlDeviceGetPowerUsage`) en un hilo cada ~100 ms durante la corrida; integrar potencia×tiempo → Wh. Registrar `avg_power_w` y `energy_wh`.
 - **Jetson Nano:** potencia por `tegrastats` o rieles INA3221 (`/sys/bus/i2c/.../in_power*`); mismo esquema de muestreo/integración.
 - **Clústeres (energía total de pared):** medidor físico en la entrada de CA (o enchufe inteligente). El código **no** mide esto; deja las columnas `avg_power_w`/`energy_wh` que se completan desde el log del medidor, alineando por `timestamp`. Emite timestamps de inicio/fin precisos para poder cruzarlos.
 

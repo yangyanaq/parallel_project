@@ -39,12 +39,16 @@ ssh <user>@192.168.77.2X 'nvcc --version; cat /etc/nv_tegra_release; mount | gre
 
 Qué queda fijado: usuario SSH, ruta del NFS montado en todos los nodos (ej. `/mnt/nfs` o `/home/pi/shared`), versiones reales de Open MPI y CUDA, ruta de los rieles INA3221 para energía Jetson, y que los relojes estén sincronizados (NTP/chrony) — crítico para alinear timestamps con el medidor de pared.
 
-### 1.3 Setup estación RTX (vía AnyDesk, manual con checklist)
+### 1.3 Setup estación RTX 4070 Ti — HECHO 2026-07-03 (acceso por SSH, no AnyDesk)
 
-1. Visual Studio 2022 Build Tools (workload C++).
-2. CUDA Toolkit 12.x (incluye `nvcc`, NVML headers y `nvml.lib`).
-3. Git para Windows + clonar el repo.
-4. Verificar: `nvcc --version`, `nvidia-smi`.
+GPU real: **RTX 4070 Ti** (12 GB, `sm_89`), no 4090. Windows 11, `192.168.77.161`.
+Acceso: **OpenSSH Server habilitado** → `ssh -J cris@10.144.101.22 <usuario>@192.168.77.161`
+(túnel vía el maestro; ver `docs/runbook_habilitar_ssh_rtx.md`).
+
+1. ✅ Visual Studio **Build Tools 2022** (workload C++, `cl` vía vcvars).
+2. ✅ CUDA Toolkit **11.8** (`nvcc` V11.8.89, `nvml.lib` presente). 11.8 = mínimo para sm_89.
+3. ✅ Git para Windows 2.42.
+4. Pendiente: **clonar el repo** en la RTX (`git clone` en el HOME).
 
 ### 1.4 Datos
 
@@ -162,7 +166,7 @@ scripts/build_rtx.ps1      # nvcc en Windows (el Makefile es para Linux)
 
 ### 4.2 Diseño (§8.3)
 
-- Una `cudaMemcpy` H2D del dataset antes del bucle (10M×4 doubles = 320 MB, sobra en 24 GB). D2H solo de `sumas/conteos` (o mantener actualización en device y bajar solo al final — decisión: **actualización de centroides en device** con un kernel trivial de k×d hilos; así el bucle no toca PCIe).
+- Una `cudaMemcpy` H2D del dataset antes del bucle (10M×4 doubles = 320 MB, sobra en 12 GB). D2H solo de `sumas/conteos` (o mantener actualización en device y bajar solo al final — decisión: **actualización de centroides en device** con un kernel trivial de k×d hilos; así el bucle no toca PCIe).
 - Kernel de asignación: 1 hilo/punto, centroides en `__constant__` (20 doubles), acumulación con **reducción en memoria compartida por bloque + `atomicAdd` global por bloque** (sm_89 tiene atomicAdd(double) nativo; la reducción por bloque reduce contención de 10M atómicas a ~40K).
 - La MISMA matemática de `kmeans_core` se replica en el kernel; para no divergir, el `.cuh` documenta la correspondencia línea a línea y la validación WCSS es el juez.
 - Tiempos: eventos CUDA para kernel y transferencias (`transfer_time_s` = H2D + D2H); `wall_time_s` con `tiempo_ahora()`.
@@ -248,7 +252,7 @@ scripts/aggregate_power.py     # integra logs de potencia (tegra/pared) → comp
 - **G2 — Reloj portable.** MSVC no tiene `clock_gettime` ⇒ `metrics.c` con `#ifdef _WIN32` → `QueryPerformanceCounter`, else `clock_gettime(CLOCK_MONOTONIC)`. En MPI, usar `MPI_Wtime`.
 - **G3 — `atomicAdd(double)` no existe en sm_53** (requiere sm_60+). El kernel Jetson usa la emulación clásica con `atomicCAS(unsigned long long)`. El kernel RTX (sm_89) usa el nativo. Mismo resultado numérico salvo orden de suma (cubierto por la tolerancia 1e-4).
 - **G4 — NVML en Windows:** headers y `nvml.lib` vienen con el CUDA Toolkit; el hilo de muestreo usa Win32 `CreateThread` (MSVC no trae `<threads.h>` de C11).
-- **G5 — FP64 en las GPUs de consumo es lento** (RTX 4090 ≈ 1/64 de FP32; Nano ≈ 1/32). El spec exige `double` — se respeta. El resultado seguirá siendo rápido vs los clústeres por el ancho de banda de memoria; documentar en la tesis, no "optimizar" cambiando a float.
+- **G5 — FP64 en las GPUs de consumo es lento** (RTX 4070 Ti ≈ 1/64 de FP32, igual que toda la gama Ada de consumo; Nano ≈ 1/32). El spec exige `double` — se respeta. El resultado seguirá siendo rápido vs los clústeres por el ancho de banda de memoria; documentar en la tesis, no "optimizar" cambiando a float.
 - **G6 — `Scatterv`, no `Scatter`:** `n` (p.ej. 100 000) no es divisible entre p=16; los conteos/desplazamientos se calculan por rank. El layout SoA obliga a 4 Scatterv (uno por dimensión) o a empaquetar: preferir 4 Scatterv.
 - **G7 — Relojes sincronizados** en todos los nodos y la PC (NTP) — sin esto la energía de pared no se puede alinear por timestamp.
 - **G8 — Línea `mpirun` desde `.10` hacia Jetsons:** el binario `kmeans_jetson` NO corre en el RPi; `mpirun --hostfile hosts_jetson` con `.10` fuera del hostfile lanza los ranks solo en las Jetsons (Open MPI lanza remoto vía ssh sin necesidad de que el nodo local participe).
