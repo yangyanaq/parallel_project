@@ -53,7 +53,11 @@ bin/kmeans_jetson: $(COMMON_SRC) src/jetson/main_hybrid.c src/jetson/kmeans_kern
 	@mv *.o build/ 2>/dev/null || true
 	$(MPICC) build/rng.o build/io_dataset.o build/kmeans_core.o build/metrics.o \
 	         build/main_hybrid.o build/kmeans_kernel.o -o $@ \
-	         -L$(CUDA_HOME)/lib64 -lcudart $(LDLIBS)
+	         -L$(CUDA_HOME)/lib64 -lcudart_static -ldl -lrt -lpthread $(LDLIBS)
+# NOTA: -lcudart_static (no -lcudart) porque el clúster Jetson es HETEROGÉNEO:
+# .21/.22 traen CUDA 10.2 y .23 trae CUDA 10.0. Enlazar el runtime dinámico
+# ataba el binario a libcudart.so.10.2, que falta en la .23 ("cannot open
+# shared object"). El runtime estático hace el binario portable entre las 3.
 
 # Igual que install-rpi: el binario al NFS para que las 3 Jetson lo vean en la
 # misma ruta (ver docs/runbook_lanzar_mpi.md, gotcha binario-en-NFS).
