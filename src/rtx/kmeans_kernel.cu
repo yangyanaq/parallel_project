@@ -22,8 +22,12 @@
 
 #define BLK 256                   /* hilos por bloque */
 
-/* Centroides en memoria constante para el kernel de asignación (k*d<=128). */
-__constant__ double c_centroides[KM_MAX_K * KM_MAX_D];
+/* Los centroides viven en memoria GLOBAL (d_centroides) y se pasan como
+ * argumento a los kernels. Nota de diseño: probamos centroides en
+ * __constant__ + cudaMemcpyToSymbol D2D por iteración, pero esa copia
+ * device->device al símbolo dejaba el stream en error (wcss=0); pasar el
+ * puntero global es correcto y, con k*d=20 doubles cacheados, igual de
+ * rápido en la práctica. */
 
 struct KmCuda {
     long   n;
@@ -51,7 +55,7 @@ struct KmCuda {
  *     de bloque (baratas);
  *  2) un representante del bloque vuelca a global con atomicAdd. */
 __global__ void k_asignar(const double *datos, long n, int k, int d,
-                          double *g_sumas, long *g_conteos)
+                          const double *centroides, double *g_sumas, long *g_conteos)
 {
     extern __shared__ double s_mem[];
     double *s_sumas   = s_mem;              /* k*d */
@@ -69,7 +73,7 @@ __global__ void k_asignar(const double *datos, long n, int k, int d,
         for (int j = 0; j < k; j++) {
             double acc = 0.0;
             for (int dim = 0; dim < d; dim++) {
-                double diff = datos[(long)dim * n + i] - c_centroides[j * d + dim];
+                double diff = datos[(long)dim * n + i] - centroides[j * d + dim];
                 acc += diff * diff;
             }
             if (acc < dist_min) { dist_min = acc; mejor = j; }
@@ -104,7 +108,7 @@ __global__ void k_actualizar(double *centroides, const double *sumas,
 /* ---- kernel WCSS: sum_i min_j ||x_i - mu_j||^2 ----
  * Reducción shared por bloque + atomicAdd global. Réplica de calcular_wcss(). */
 __global__ void k_wcss(const double *datos, long n, int k, int d,
-                       double *g_wcss)
+                       const double *centroides, double *g_wcss)
 {
     __shared__ double s_red[BLK];
     long i = (long)blockIdx.x * blockDim.x + threadIdx.x;
@@ -115,7 +119,7 @@ __global__ void k_wcss(const double *datos, long n, int k, int d,
         for (int j = 0; j < k; j++) {
             double acc = 0.0;
             for (int dim = 0; dim < d; dim++) {
-                double diff = datos[(long)dim * n + i] - c_centroides[j * d + dim];
+                double diff = datos[(long)dim * n + i] - centroides[j * d + dim];
                 acc += diff * diff;
             }
             if (acc < m) m = acc;
@@ -169,21 +173,20 @@ void km_cuda_iterar(KmCuda *c, float *ms_kernel)
     cudaEventCreate(&a); cudaEventCreate(&b);
     cudaEventRecord(a);
 
-    /* refrescar centroides en __constant__ (device->device) */
-    cudaMemcpyToSymbol(c_centroides, c->d_centroides,
-                       (size_t)c->k * c->d * sizeof(double), 0,
-                       cudaMemcpyDeviceToDevice);
     cudaMemset(c->d_sumas,   0, (size_t)c->k * c->d * sizeof(double));
     cudaMemset(c->d_conteos, 0, (size_t)c->k * sizeof(long));
 
     size_t shmem = (size_t)c->k * c->d * sizeof(double) + (size_t)c->k * sizeof(long);
     k_asignar<<<c->nbloques, BLK, shmem>>>(c->d_datos, c->n, c->k, c->d,
-                                           c->d_sumas, c->d_conteos);
+                                           c->d_centroides, c->d_sumas, c->d_conteos);
     int nb_upd = (c->k * c->d + BLK - 1) / BLK;
     k_actualizar<<<nb_upd, BLK>>>(c->d_centroides, c->d_sumas, c->d_conteos,
                                   c->k, c->d);
 
     cudaEventRecord(b); cudaEventSynchronize(b);
+    cudaError_t e = cudaGetLastError();
+    if (e != cudaSuccess)
+        fprintf(stderr, "CUDA error en iterar: %s\n", cudaGetErrorString(e));
     float ms = 0.0f; cudaEventElapsedTime(&ms, a, b);
     if (ms_kernel) *ms_kernel += ms;
     cudaEventDestroy(a); cudaEventDestroy(b);
@@ -191,12 +194,12 @@ void km_cuda_iterar(KmCuda *c, float *ms_kernel)
 
 double km_cuda_wcss(KmCuda *c, float *ms_d2h)
 {
-    /* asegurar centroides finales en __constant__ */
-    cudaMemcpyToSymbol(c_centroides, c->d_centroides,
-                       (size_t)c->k * c->d * sizeof(double), 0,
-                       cudaMemcpyDeviceToDevice);
     cudaMemset(c->d_wcss_parcial, 0, sizeof(double));
-    k_wcss<<<c->nbloques, BLK>>>(c->d_datos, c->n, c->k, c->d, c->d_wcss_parcial);
+    k_wcss<<<c->nbloques, BLK>>>(c->d_datos, c->n, c->k, c->d,
+                                 c->d_centroides, c->d_wcss_parcial);
+    cudaError_t e = cudaGetLastError();
+    if (e != cudaSuccess)
+        fprintf(stderr, "CUDA error en wcss: %s\n", cudaGetErrorString(e));
 
     double wcss = 0.0;
     cudaEvent_t a, b;
