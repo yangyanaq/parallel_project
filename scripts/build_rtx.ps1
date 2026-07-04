@@ -32,14 +32,21 @@ $fuentes = @(
     "src\rtx\main_cuda.cu", "src\rtx\kmeans_kernel.cu", "src\rtx\energia_nvml.cu"
 ) -join " "
 
+# CUDA 11.8 NO soporta MSVC 14.40 (VS 17.10+). En esta maquina hay varios
+# toolsets; pedimos el 14.29 (VS 2019, soportado por 11.8) a vcvars con
+# -vcvars_ver=14.29 y usamos -use-local-env para que nvcc NO re-invoque
+# vcvars (evita el "Could not set up the environment"). El toolset se puede
+# sobreescribir con la env var KM_VCVARS_VER.
+$vcverToolset = if ($env:KM_VCVARS_VER) { $env:KM_VCVARS_VER } else { "14.29" }
+
 # -arch=sm_89 (Ada), -O3, host MSVC /O2, enlaza nvml.lib
-$nvccCmd = "nvcc -O3 -arch=sm_89 -std=c++14 -Xcompiler /O2 " +
+$nvccCmd = "nvcc -O3 -arch=sm_89 -std=c++14 -use-local-env -Xcompiler /O2 " +
            "-o bin\kmeans_rtx.exe $fuentes `"$nvmlLib`""
 
 $bat = Join-Path $env:TEMP "km_build_rtx.bat"
 @"
 @echo off
-call "$vcvars" >nul
+call "$vcvars" -vcvars_ver=$vcverToolset >nul
 if errorlevel 1 exit /b 1
 $nvccCmd
 "@ | Set-Content -Encoding ascii $bat
