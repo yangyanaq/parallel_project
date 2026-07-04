@@ -29,6 +29,9 @@ MCA_JET="--mca btl_tcp_if_include eth0 --mca oob_tcp_if_include eth0"
 JETSONS="192.168.77.21 192.168.77.22 192.168.77.23"
 POWER_DIR=$NFS/power          # logs INA3221 por corrida (alineables por timestamp)
 
+# cabecera del CSV (§9), por si hay que crear el archivo al anexar filas Jetson
+CSV_HEADER="platform,variant,dataset_rows,num_procs,num_gpus,repetition,wall_time_s,compute_time_s,comm_time_s,transfer_time_s,wcss,speedup,efficiency,avg_power_w,energy_wh,throughput_pts_s,k,d,iterations,seed,timestamp"
+
 # El CSV vive en el NFS: en las corridas Jetson el rank 0 puede caer en cualquier
 # nodo, así que --out debe ser una ruta compartida (si fuera local, cada nodo
 # escribiría su propio archivo). El maestro monta el mismo NFS -> el post-proceso
@@ -119,6 +122,11 @@ bench_rpi() {
 }
 
 # ============================ Jetson híbrido ============================
+# El rank 0 (que escribe el CSV) corre en una Jetson, y fopen("a") sobre el NFS
+# bajo mpirun falla por la caché de atributos de NFSv3 (append multiusuario). Por
+# eso cada corrida escribe UNA fila a un CSV LOCAL único (/tmp) en el nodo del
+# rank 0; luego el maestro recupera esa fila de las 3 Jetson (solo una la tiene)
+# y la anexa al CSV del NFS. Escritura al NFS la hace 'cris' en el maestro.
 bench_jetson() {
   for tam in $SIZES; do
     local rows; rows=$(n_de_tam "$tam")
@@ -126,11 +134,21 @@ bench_jetson() {
       for rep in $(seq 0 "$REPS"); do
         if ya_hecha "jetson" "hybrid" "$rows" "$np" "$rep"; then
           echo "skip jetson $tam np=$np rep=$rep (ya)"; continue; fi
+        local tmp="/tmp/km_j_${tam}_np${np}_r${rep}.csv"
+        for ip in $JETSONS; do ssh -o BatchMode=yes nano@"$ip" "rm -f $tmp" 2>/dev/null; done
         [ "$DRY" = 0 ] && power_start "${tam}_np${np}_r${rep}"
         correr "jetson $tam np=$np rep=$rep" \
           "$MPIRUN" --hostfile "$HF_JET" -np "$np" $MCA_JET "$BIN_JET" \
-            --data "$DATA/nyc_${tam}.bin" --out "$OUT" --rep "$rep" --quiet
+            --data "$DATA/nyc_${tam}.bin" --out "$tmp" --rep "$rep" --quiet
         [ "$DRY" = 0 ] && power_stop
+        # recuperar la fila (sin cabecera) del nodo del rank 0 y anexar al NFS
+        if [ "$DRY" = 0 ]; then
+          [ -f "$OUT" ] || echo "$CSV_HEADER" > "$OUT"
+          for ip in $JETSONS; do
+            fila=$(ssh -o BatchMode=yes nano@"$ip" "grep -h hybrid $tmp 2>/dev/null" | head -1)
+            [ -n "$fila" ] && { echo "$fila" >> "$OUT"; break; }
+          done
+        fi
       done
     done
   done
