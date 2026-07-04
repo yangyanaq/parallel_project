@@ -22,6 +22,9 @@
 
 #define BLK 256                   /* hilos por bloque */
 
+/* Conteos en device: SIEMPRE 64 bits (ver nota en k_asignar). */
+typedef unsigned long long u64;
+
 /* Los centroides viven en memoria GLOBAL (d_centroides) y se pasan como
  * argumento a los kernels. Nota de diseño: probamos centroides en
  * __constant__ + cudaMemcpyToSymbol D2D por iteración, pero esa copia
@@ -35,7 +38,7 @@ struct KmCuda {
     double *d_datos;        /* SoA n*d en device */
     double *d_centroides;   /* AoS k*d */
     double *d_sumas;        /* AoS k*d */
-    long   *d_conteos;      /* k */
+    u64    *d_conteos;      /* k (64 bits: atomicAdd + long de 4 bytes en Win) */
     double *d_wcss_parcial; /* 1 (reducción global) */
     int     nbloques;
 };
@@ -54,15 +57,18 @@ struct KmCuda {
  *  1) cada bloque acumula en shared (s_sumas[k*d], s_conteos[k]) con átomicas
  *     de bloque (baratas);
  *  2) un representante del bloque vuelca a global con atomicAdd. */
+/* En Windows/MSVC `long` es 4 bytes, así que tratar un long* como
+ * (unsigned long long*) para atomicAdd daba "misaligned address". Por eso los
+ * conteos son u64 en todo el device; km_cuda_iterar no baja conteos a host. */
 __global__ void k_asignar(const double *datos, long n, int k, int d,
-                          const double *centroides, double *g_sumas, long *g_conteos)
+                          const double *centroides, double *g_sumas, u64 *g_conteos)
 {
     extern __shared__ double s_mem[];
-    double *s_sumas   = s_mem;              /* k*d */
-    long   *s_conteos = (long *)(s_sumas + k * d);   /* k */
+    double *s_sumas   = s_mem;                      /* k*d doubles */
+    u64    *s_conteos = (u64 *)(s_sumas + k * d);   /* k u64 (alineado a 8) */
 
     for (int t = threadIdx.x; t < k * d; t += blockDim.x) s_sumas[t] = 0.0;
-    for (int t = threadIdx.x; t < k;     t += blockDim.x) s_conteos[t] = 0;
+    for (int t = threadIdx.x; t < k;     t += blockDim.x) s_conteos[t] = 0ULL;
     __syncthreads();
 
     long i = (long)blockIdx.x * blockDim.x + threadIdx.x;
@@ -80,26 +86,25 @@ __global__ void k_asignar(const double *datos, long n, int k, int d,
         }
         for (int dim = 0; dim < d; dim++)
             atomicAdd(&s_sumas[mejor * d + dim], datos[(long)dim * n + i]);
-        atomicAdd((unsigned long long *)&s_conteos[mejor], 1ULL);
+        atomicAdd(&s_conteos[mejor], 1ULL);
     }
     __syncthreads();
 
     for (int t = threadIdx.x; t < k * d; t += blockDim.x)
         atomicAdd(&g_sumas[t], s_sumas[t]);
     for (int t = threadIdx.x; t < k; t += blockDim.x)
-        atomicAdd((unsigned long long *)&g_conteos[t],
-                  (unsigned long long)s_conteos[t]);
+        atomicAdd(&g_conteos[t], s_conteos[t]);
 }
 
 /* ---- kernel (c): actualizar centroides (k*d hilos) ----
  * Réplica de actualizar_centroides(): mu_j = suma_j/conteo_j; vacío conserva. */
 __global__ void k_actualizar(double *centroides, const double *sumas,
-                             const long *conteos, int k, int d)
+                             const u64 *conteos, int k, int d)
 {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t < k * d) {
         int j = t / d;
-        if (conteos[j] > 0)
+        if (conteos[j] > 0ULL)
             centroides[t] = sumas[t] / (double)conteos[j];
         /* conteo 0: se conserva el valor previo (no se toca) */
     }
@@ -149,7 +154,7 @@ KmCuda *km_cuda_crear(const double *h_datos, long n, int k, int d,
     CHK(cudaMalloc(&c->d_datos,        (size_t)n * d * sizeof(double)));
     CHK(cudaMalloc(&c->d_centroides,   (size_t)k * d * sizeof(double)));
     CHK(cudaMalloc(&c->d_sumas,        (size_t)k * d * sizeof(double)));
-    CHK(cudaMalloc(&c->d_conteos,      (size_t)k * sizeof(long)));
+    CHK(cudaMalloc(&c->d_conteos,      (size_t)k * sizeof(u64)));
     CHK(cudaMalloc(&c->d_wcss_parcial, sizeof(double)));
 
     /* H2D del dataset (1 vez), cronometrado con eventos CUDA. */
@@ -174,9 +179,9 @@ void km_cuda_iterar(KmCuda *c, float *ms_kernel)
     cudaEventRecord(a);
 
     cudaMemset(c->d_sumas,   0, (size_t)c->k * c->d * sizeof(double));
-    cudaMemset(c->d_conteos, 0, (size_t)c->k * sizeof(long));
+    cudaMemset(c->d_conteos, 0, (size_t)c->k * sizeof(u64));
 
-    size_t shmem = (size_t)c->k * c->d * sizeof(double) + (size_t)c->k * sizeof(long);
+    size_t shmem = (size_t)c->k * c->d * sizeof(double) + (size_t)c->k * sizeof(u64);
     k_asignar<<<c->nbloques, BLK, shmem>>>(c->d_datos, c->n, c->k, c->d,
                                            c->d_centroides, c->d_sumas, c->d_conteos);
     int nb_upd = (c->k * c->d + BLK - 1) / BLK;
