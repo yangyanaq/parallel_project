@@ -38,10 +38,15 @@ install-rpi: rpi
 	cp bin/kmeans_rpi $(NFS_DIR)/bin/kmeans_rpi
 	@echo "binario en $(NFS_DIR)/bin/kmeans_rpi (visible por todos los nodos)"
 
-# Jetson: kernels con nvcc (CUDA 10.2, sm_53), host con mpicc, enlace con mpicc.
+# Jetson: kernels con nvcc (sm_53), host con mpicc, enlace con mpicc.
 # nvcc no está en el PATH de la Jetson -> CUDA_HOME apunta al toolkit. gcc 7.5
 # y el host híbrido en C11 conservador (sin -march=native para no arriesgar en
 # la toolchain vieja; ver PLAN §5).
+#
+# IMPORTANTE (clúster heterogéneo): compilar en la Jetson con el CUDA MÁS VIEJO
+# (.23 = CUDA 10.0), NO en las de 10.2. Un binario 10.2 falla en la .23 con
+# "CUDA driver version is insufficient" (su driver/JetPack es más antiguo). El
+# runtime 10.0 es retrocompatible y corre en las 3. Ver docs/runbook_jetson.md.
 CUDA_HOME ?= /usr/local/cuda
 JCFLAGS    = -O3 -std=c11 -funroll-loops -Wall -Wextra
 jetson: bin/kmeans_jetson
