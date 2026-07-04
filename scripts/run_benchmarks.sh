@@ -29,7 +29,11 @@ MCA_JET="--mca btl_tcp_if_include eth0 --mca oob_tcp_if_include eth0"
 JETSONS="192.168.77.21 192.168.77.22 192.168.77.23"
 POWER_DIR=$NFS/power          # logs INA3221 por corrida (alineables por timestamp)
 
-OUT=results/benchmark.csv
+# El CSV vive en el NFS: en las corridas Jetson el rank 0 puede caer en cualquier
+# nodo, así que --out debe ser una ruta compartida (si fuera local, cada nodo
+# escribiría su propio archivo). El maestro monta el mismo NFS -> el post-proceso
+# lo lee desde aquí. Se copia a results/benchmark.csv (versionado) al final.
+OUT=$NFS/results/benchmark.csv
 REPS=5                        # reps "en caliente" (1..REPS); además la rep 0 en frío
 SIZES="100K 1M 10M"
 NP_RPI="1 2 4 8 16 20"
@@ -140,5 +144,15 @@ case "$ONLY" in
   "")     bench_seq; bench_rpi; bench_jetson;;
   *) echo "only invalido: $ONLY"; exit 1;;
 esac
-echo "=== fin. Filas en $OUT: $(( $(wc -l < "$OUT" 2>/dev/null || echo 1) - 1 )) ==="
+if [ -f "$OUT" ]; then
+  echo "=== fin. Filas en $OUT: $(( $(wc -l < "$OUT") - 1 )) ==="
+  # copia al repo (results/benchmark.csv se versiona — dato central de la tesis)
+  if [ "$DRY" = 0 ]; then
+    mkdir -p "$REPO/results"
+    cp "$OUT" "$REPO/results/benchmark.csv"
+    echo "copiado a $REPO/results/benchmark.csv (versionar)"
+  fi
+else
+  echo "=== fin (dry-run: $OUT no creado) ==="
+fi
 echo "Ahora: completar RTX (run_benchmarks_rtx.ps1) y post-procesar (aggregate_power.py)."
