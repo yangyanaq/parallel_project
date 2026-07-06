@@ -19,7 +19,7 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 $bin = "bin\kmeans_rtx.exe"
-if (-not (Test-Path $bin)) { throw "falta $bin — compila con scripts\build_rtx.ps1" }
+if (-not (Test-Path $bin)) { throw "falta $bin - compila con scripts\build_rtx.ps1" }
 New-Item -ItemType Directory -Force (Split-Path $Out) | Out-Null
 
 # fila ya presente? platform=rtx4070ti, col3=rows, col6=repetition
@@ -34,7 +34,7 @@ foreach ($tam in $Sizes) {
   $rows = N-DeTam $tam
   $data = Join-Path $DataDir "nyc_$tam.bin"
   if (-not (Test-Path $data)) { Write-Warning "falta $data (bajalo del NFS); salto $tam"; continue }
-  foreach ($rep in 0..$Reps) {          # rep 0 = corrida en frío (se filtra al graficar)
+  foreach ($rep in 0..$Reps) {          # rep 0 = corrida en frio (se filtra al graficar)
     if (Ya-Hecha $rows $rep) { Write-Host "skip rtx $tam rep=$rep (ya)"; continue }
     Write-Host ">>> rtx $tam rep=$rep"
     if ($DryRun) { Write-Host "    [dry-run] $bin --data $data --rep $rep"; continue }
@@ -44,4 +44,4 @@ foreach ($tam in $Sizes) {
 }
 $filas = (Get-Content $Out | Measure-Object -Line).Lines - 1
 Write-Host "=== fin. Filas en ${Out}: $filas ==="
-Write-Host "Copia este CSV al maestro y unelo con el de los clusteres antes de aggregate_power.py."
+Write-Host "Copia este CSV al maestro y unelo con el de los clusteres antes de aggregate_power.py"
