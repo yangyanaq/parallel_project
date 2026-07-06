@@ -54,6 +54,15 @@ powershell -ExecutionPolicy Bypass -File scripts\build_rtx.ps1        # si cambi
 powershell -ExecutionPolicy Bypass -File scripts\run_benchmarks_rtx.ps1 -Reps 5
 ```
 
+**OJO al invocar por SSH/cmd:** `-Sizes 100K,1M,10M` NO se separa como array al
+pasar por cmd (llega como un solo string "100K,1M,10M" y no encuentra el .bin).
+Usar la forma de array explícita:
+
+```powershell
+powershell -Command "& { .\scripts\run_benchmarks_rtx.ps1 -Reps 5 -Sizes @('100K','1M','10M') }"
+```
+(Ejecutado localmente con `-File`, el default de `-Sizes` ya es los 3 tamaños.)
+
 - La energía la mide el binario por NVML (columnas ya llenas). Salida:
   `results\benchmark_rtx.csv`. **Cópialo al maestro** y concaténalo (sin cabecera)
   al `benchmark.csv` de los clústeres antes del post-proceso.
