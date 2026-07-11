@@ -235,10 +235,17 @@ def g8_convergencia(conv_path, figs, pdf):
         print("  [skip] g8 convergencia: sin wcss_convergence.csv"); return
     c = pd.read_csv(conv_path)
     fig, ax = plt.subplots(figsize=(6, 4))
-    for plat in c["platform"].unique():
+    # Las curvas son numéricamente idénticas y se tapan entre sí: se dibujan
+    # con anchos y trazos distintos (sólido/discontinuo/punteado) para que
+    # las tres queden visibles una sobre otra.
+    ESTILO = {"rpi5": ("-", 3.5), "jetson": ("--", 2.0), "rtx4070ti": (":", 1.4)}
+    orden = [p for p in ["rpi5", "jetson", "rtx4070ti"] if p in set(c["platform"])]
+    orden += [p for p in c["platform"].unique() if p not in orden]
+    for plat in orden:
         sub = c[c["platform"] == plat].sort_values("iteration")
         col = COLOR.get(plat, None)
-        ax.plot(sub["iteration"], sub["wcss"], color=col,
+        ls, lw = ESTILO.get(plat, ("-", 2.0))
+        ax.plot(sub["iteration"], sub["wcss"], color=col, ls=ls, lw=lw,
                 label=ETIQUETA.get(plat, plat))
     ax.set_xlabel("iteración"); ax.set_ylabel("WCSS")
     ax.set_title("Convergencia del WCSS por iteración"); ax.legend()
@@ -262,6 +269,88 @@ def g9_throughput_vs_tam(df, figs, pdf):
     ax.set_title("Throughput vs tamaño")
     ax.set_xticks(TAMS); ax.set_xticklabels([TAM_LBL[t] for t in TAMS]); ax.legend()
     guardar(fig, figs, "09_throughput_vs_tamano", pdf)
+
+
+def g10_speedup_computo_vs_total(df, figs, pdf):
+    """10. Speedup del cómputo puro vs speedup total (RPi, 10M).
+
+    Aísla al culpable de la degradación: el speedup calculado SOLO con
+    compute_time_s escala casi ideal (19.9x con p=20, eficiencia 99%),
+    mientras el total colapsa a 1.9x. La brecha vertical entre ambas
+    curvas ES el costo de sincronización. Análisis del Cap. 7 (frontera
+    del nodo); ver docs/analisis_extras_para_redaccion.md."""
+    tam = 10_000_000
+    seq = df[(df["variant"] == "seq") & (df["dataset_rows"] == tam)]
+    mpi = df[(df["platform"] == "rpi5") & (df["variant"] == "mpi") &
+             (df["dataset_rows"] == tam)]
+    if seq.empty or mpi.empty:
+        print("  [skip] g10: sin datos seq/mpi de 10M"); return
+    t1 = seq["wall_time_s"].mean()
+
+    # speedup por corrida (rep a rep) para tener barras de error honestas
+    g_tot = mpi.assign(s=t1 / mpi["wall_time_s"]) \
+               .groupby("num_procs")["s"].agg(["mean", "std"])
+    g_cmp = mpi.assign(s=t1 / mpi["compute_time_s"]) \
+               .groupby("num_procs")["s"].agg(["mean", "std"])
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.4))
+    lim = int(g_tot.index.max())
+    ax.plot([1, lim], [1, lim], "--", color=COLOR["ideal"], label="ideal (y=x)")
+    ax.errorbar(g_cmp.index, g_cmp["mean"], yerr=g_cmp["std"].fillna(0),
+                marker="s", capsize=3, color=COLOR["rtx4070ti"],
+                label="cómputo puro (sin sincronización)")
+    ax.errorbar(g_tot.index, g_tot["mean"], yerr=g_tot["std"].fillna(0),
+                marker="o", capsize=3, color=COLOR["rpi5"],
+                label="total (con sincronización)")
+    # anotar la brecha en p máximo
+    ax.annotate("", xy=(lim, g_tot["mean"].iloc[-1]),
+                xytext=(lim, g_cmp["mean"].iloc[-1]),
+                arrowprops=dict(arrowstyle="<->", color="#555555", lw=1.2))
+    ax.text(lim - 0.4, (g_tot["mean"].iloc[-1] + g_cmp["mean"].iloc[-1]) / 2,
+            "costo de\nsincronización", ha="right", va="center",
+            fontsize=9, color="#555555")
+    ax.set_xlabel("nº de procesos"); ax.set_ylabel("speedup (T₁ / Tₚ)")
+    ax.set_title("Speedup del cómputo puro vs total — clúster RPi 5, 10M")
+    ax.set_xticks(sorted(g_tot.index)); ax.legend(loc="upper left")
+    guardar(fig, figs, "10_speedup_computo_vs_total", pdf)
+
+
+def g11_firma_desincronizacion(df, figs, pdf):
+    """11. Firma de la desincronización: comm por iteración vs tamaño, a p fijo.
+
+    El Allreduce mueve 180 bytes por iteración, independientes de n: si el
+    costo fuera solo latencia de red, las líneas serían PLANAS. Crecen con
+    el tamaño del dataset porque más cómputo desalinea más a los procesos
+    y la colectiva espera al último (desincronización). Evidencia del
+    argumento del Cap. 7 §3; ver docs/analisis_extras_para_redaccion.md."""
+    mpi = df[(df["platform"] == "rpi5") & (df["variant"] == "mpi") &
+             (df["num_procs"] >= 8)]                 # solo configs multinodo
+    if mpi.empty:
+        print("  [skip] g11: sin datos multinodo"); return
+    iters = int(mpi["iterations"].iloc[0])
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    marcas = {8: "o", 16: "s", 20: "^"}
+    azules = {8: "#7BAFD4", 16: "#3D85C6", 20: "#0B5394"}   # secuencia de un solo tono
+    for p in sorted(mpi["num_procs"].unique()):
+        sub = mpi[mpi["num_procs"] == p]
+        # ms de comunicación por iteración (cada iteración = 2 Allreduce)
+        g = (sub.assign(ms=sub["comm_time_s"] * 1000.0 / iters)
+                .groupby("dataset_rows")["ms"].agg(["mean", "std"])
+                .reindex(TAMS).dropna())
+        ax.errorbar(g.index, g["mean"], yerr=g["std"].fillna(0),
+                    marker=marcas.get(p, "o"), capsize=3,
+                    color=azules.get(p), label=f"p = {p}")
+    ax.set_xscale("log")
+    ax.set_xticks(TAMS); ax.set_xticklabels([TAM_LBL[t] for t in TAMS])
+    ax.set_xlabel("tamaño del dataset")
+    ax.set_ylabel("comunicación por iteración (ms)")
+    ax.set_title("Firma de la desincronización — clúster RPi 5 multinodo")
+    ax.text(0.02, 0.96, "mensaje constante: 180 B/iteración\n"
+            "si fuera solo latencia de red, las líneas serían planas",
+            transform=ax.transAxes, fontsize=8.5, va="top", color="#555555")
+    ax.legend(title="procesos", loc="center left")
+    guardar(fig, figs, "11_firma_desincronizacion", pdf)
 
 
 def main():
@@ -299,6 +388,9 @@ def main():
     g7_throughput_por_dolar(df, args.figs, args.pdf)
     g8_convergencia(args.conv, args.figs, args.pdf)
     g9_throughput_vs_tam(df, args.figs, args.pdf)
+    # figuras de análisis adicionales (Cap. 7: aislar el costo de sincronización)
+    g10_speedup_computo_vs_total(df, args.figs, args.pdf)
+    g11_firma_desincronizacion(df, args.figs, args.pdf)
     print(f"\nListo. PNG (200 dpi) en {os.path.abspath(args.figs)}")
 
 
